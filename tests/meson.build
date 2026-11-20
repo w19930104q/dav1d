@@ -139,6 +139,23 @@ if (get_option('enable_tools') and get_option('enable_seek_stress'))
             libm_dependency,
         ],
     )
+
+    # Smoke tests: the binary must start up, parse its own options and
+    # terminate in bounded time, even on input it cannot demux. Functional
+    # coverage on real streams is provided by the 'testdata_seek-stress'
+    # suite from the dav1d-test-data repository.
+    test('seek_stress-smoke', seek_stress,
+        args: ['-q', '--seed', '1', '-n', '1', '-t', '10', '--muxer', 'null',
+               '-i', files('seek_stress.c')],
+        suite: 'seek_stress',
+        timeout: 30,
+    )
+    test('seek_stress-invalid-option', seek_stress,
+        args: ['-n', 'not-a-number'],
+        suite: 'seek_stress',
+        should_fail: true,
+        timeout: 30,
+    )
 endif
 
 # Include dav1d test data repository with additional tests
