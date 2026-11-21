@@ -40,6 +40,9 @@ typedef struct Demuxer {
                 unsigned fps[2], unsigned *num_frames, unsigned timebase[2]);
     int (*read)(DemuxerPriv *ctx, Dav1dData *data);
     int (*seek)(DemuxerPriv *ctx, uint64_t pts);
+    int (*seek_frame)(DemuxerPriv *ctx, unsigned frame_num,
+                      unsigned *seek_pkt, unsigned *frames_before,
+                      unsigned *total_showable);
     void (*close)(DemuxerPriv *ctx);
 } Demuxer;
 

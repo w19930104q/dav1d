@@ -187,6 +187,50 @@ static void signal_handler(const int s) {
     signal_terminate = 1;
 }
 
+/*
+ * Handle one decoded picture. Pictures with an absolute frame number below
+ * seek_frame are decoded (to keep references valid) but not output; every
+ * other picture is written with its full-decode frame number so that output
+ * ordering and per-frame file names match a full decode.
+ * Returns 0 on success, < 0 on output error.
+ */
+static int output_picture(const CLISettings *const cli_settings,
+                          MuxerContext **const out, Dav1dPicture *const p,
+                          const int seek_frame, unsigned *const frame_num,
+                          unsigned *const n_out,
+                          const unsigned fps[2], const uint64_t nspf,
+                          const uint64_t tfirst, uint64_t *const elapsed,
+                          FILE *const frametimes, const int istty,
+                          const unsigned total, const double i_fps)
+{
+    const unsigned cur_frame = (*frame_num)++;
+    if (seek_frame >= 0 && cur_frame < (unsigned) seek_frame) {
+        dav1d_picture_unref(p);
+        return 0;
+    }
+    int res;
+    if (!*n_out) {
+        if ((res = output_open(out, cli_settings->muxer,
+                               cli_settings->outputfile,
+                               &p->p, fps)) < 0)
+        {
+            dav1d_picture_unref(p);
+            return res;
+        }
+        output_set_first_framenum(*out, cur_frame);
+    }
+    if ((res = output_write(*out, p)) < 0)
+        return res;
+    (*n_out)++;
+    if (nspf || !cli_settings->quiet) {
+        synchronize(cli_settings->realtime, cli_settings->realtime_cache,
+                    *n_out, nspf, tfirst, elapsed, frametimes);
+    }
+    if (!cli_settings->quiet)
+        print_stats(istty, *n_out, total, *elapsed, i_fps);
+    return 0;
+}
+
 int main(const int argc, char *const *const argv) {
     const int istty = isatty(fileno(stderr));
     int res = 0;
@@ -198,6 +242,12 @@ int main(const int argc, char *const *const argv) {
     Dav1dContext *c;
     Dav1dData data;
     unsigned n_out = 0, total, fps[2], timebase[2];
+    // absolute display-order number of the next picture handed to the muxer
+    unsigned frame_num = 0;
+    // when seeking, output starts at this absolute frame number
+    int seek_frame = -1;
+    // total number of showable frames in the input (seek mode only)
+    unsigned total_showable = 0;
     uint64_t nspf, tfirst, elapsed = 0;
     double i_fps;
     FILE *frametimes = NULL;
@@ -228,6 +278,33 @@ int main(const int argc, char *const *const argv) {
     {
         return EXIT_FAILURE;
     }
+
+    if (cli_settings.seek >= 0) {
+        // --seek only supports IVF, where packets can be located by file
+        // offset and keyframes can be identified without linear parsing.
+        if (strcmp(input_demuxer_name(in), "ivf")) {
+            fprintf(stderr, "--seek is only supported for IVF input "
+                            "(input demuxer: %s)\n",
+                    input_demuxer_name(in));
+            input_close(in);
+            return EXIT_FAILURE;
+        }
+        unsigned seek_pkt, frames_before;
+        if ((res = input_seek_frame(in, (unsigned) cli_settings.seek,
+                                    &seek_pkt, &frames_before,
+                                    &total_showable)) < 0)
+        {
+            input_close(in);
+            return EXIT_FAILURE;
+        }
+        seek_frame = cli_settings.seek;
+        frame_num = frames_before;
+        if (!cli_settings.quiet)
+            fprintf(stderr, "Seeking to frame %d (decoding starts at "
+                            "keyframe packet %u)\n",
+                    cli_settings.seek, seek_pkt);
+    }
+
     for (unsigned i = 0; i <= cli_settings.skip; i++) {
         if ((res = input_read(in, &data)) < 0) {
             input_close(in);
@@ -257,8 +334,15 @@ int main(const int argc, char *const *const argv) {
                     seq_skip);
     }
 
-    if (cli_settings.limit != 0 && cli_settings.limit < total)
+    if (seek_frame >= 0) {
+        // In seek mode "total" is the number of pictures that will be
+        // output (display-order frames from the seek point to the end).
+        total = total_showable - (unsigned) seek_frame;
+        if (cli_settings.limit != 0 && cli_settings.limit < total)
+            total = cli_settings.limit;
+    } else if (cli_settings.limit != 0 && cli_settings.limit < total) {
         total = cli_settings.limit;
+    }
 
     if ((res = dav1d_open(&c, &lib_settings))) {
         dav1d_data_unref(&data);
@@ -316,24 +400,11 @@ int main(const int argc, char *const *const argv) {
             }
             res = 0;
         } else {
-            if (!n_out) {
-                if ((res = output_open(&out, cli_settings.muxer,
-                                       cli_settings.outputfile,
-                                       &p.p, fps)) < 0)
-                {
-                    dav1d_picture_unref(&p);
-                    break;
-                }
-            }
-            if ((res = output_write(out, &p)) < 0)
-                break;
-            n_out++;
-            if (nspf || !cli_settings.quiet) {
-                synchronize(cli_settings.realtime, cli_settings.realtime_cache,
-                            n_out, nspf, tfirst, &elapsed, frametimes);
-            }
-            if (!cli_settings.quiet)
-                print_stats(istty, n_out, total, elapsed, i_fps);
+            res = output_picture(&cli_settings, &out, &p, seek_frame,
+                                 &frame_num, &n_out, fps, nspf,
+                                 tfirst, &elapsed, frametimes, istty,
+                                 total, i_fps);
+            if (res < 0) break;
         }
 
         if (cli_settings.limit && n_out == cli_settings.limit)
@@ -356,24 +427,11 @@ int main(const int argc, char *const *const argv) {
                 break;
             }
         } else {
-            if (!n_out) {
-                if ((res = output_open(&out, cli_settings.muxer,
-                                       cli_settings.outputfile,
-                                       &p.p, fps)) < 0)
-                {
-                    dav1d_picture_unref(&p);
-                    break;
-                }
-            }
-            if ((res = output_write(out, &p)) < 0)
-                break;
-            n_out++;
-            if (nspf || !cli_settings.quiet) {
-                synchronize(cli_settings.realtime, cli_settings.realtime_cache,
-                            n_out, nspf, tfirst, &elapsed, frametimes);
-            }
-            if (!cli_settings.quiet)
-                print_stats(istty, n_out, total, elapsed, i_fps);
+            res = output_picture(&cli_settings, &out, &p, seek_frame,
+                                 &frame_num, &n_out, fps, nspf,
+                                 tfirst, &elapsed, frametimes, istty,
+                                 total, i_fps);
+            if (res < 0) break;
         }
     }
 

@@ -35,6 +35,12 @@ typedef struct MuxerContext MuxerContext;
 int output_open(MuxerContext **c, const char *name, const char *filename,
                 const Dav1dPictureParameters *p, const unsigned fps[2]);
 int output_write(MuxerContext *ctx, Dav1dPicture *pic);
+/*
+ * Set the absolute frame number of the first picture that will be written,
+ * so that per-frame output files (%n) use the same numbers as a full decode.
+ * Must be called before output_write().
+ */
+void output_set_first_framenum(MuxerContext *ctx, unsigned framenum);
 void output_close(MuxerContext *ctx);
 /**
  * Verifies the muxed data (for example in the md5 muxer). Replaces output_close.

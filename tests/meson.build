@@ -141,6 +141,20 @@ if (get_option('enable_tools') and get_option('enable_seek_stress'))
     )
 endif
 
+# CLI --seek regression test: drives the dav1d binary over checked-in IVF
+# fixtures and checks md5/frame-number equivalence with a full decode.
+if get_option('enable_tools')
+    seek_test_py = find_program('seek/seek_test.py', required: false)
+    if seek_test_py.found()
+        test('seek',
+             seek_test_py,
+             args: [dav1d.full_path(), meson.current_source_dir() / 'seek'],
+             suite: 'seek',
+             timeout: 120,
+        )
+    endif
+endif
+
 # Include dav1d test data repository with additional tests
 if get_option('testdata_tests')
     subdir('dav1d-test-data')

@@ -37,6 +37,19 @@ int input_open(DemuxerContext **const c_out,
                unsigned fps[2], unsigned *num_frames, unsigned timebase[2]);
 int input_read(DemuxerContext *ctx, Dav1dData *data);
 int input_seek(DemuxerContext *ctx, uint64_t pts);
+/*
+ * Seek to the packet containing the frame with the given (0-based) display
+ * order frame number. The demuxer may position itself at an earlier packet
+ * (the closest preceding random access point / keyframe); the actual packet
+ * index and the number of showable frames preceding it are returned through
+ * seek_pkt and frames_before. total_showable receives the overall number of
+ * showable frames in the file. Only supported by the IVF demuxer; returns -1
+ * for other input formats.
+ */
+int input_seek_frame(DemuxerContext *ctx, unsigned frame_num,
+                     unsigned *seek_pkt, unsigned *frames_before,
+                     unsigned *total_showable);
+const char *input_demuxer_name(DemuxerContext *ctx);
 void input_close(DemuxerContext *ctx);
 
 #endif /* DAV1D_INPUT_INPUT_H */

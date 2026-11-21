@@ -38,6 +38,7 @@ typedef struct {
     const char *frametimes;
     const char *verify;
     unsigned limit, skip;
+    int seek;
     int quiet;
     enum {
         REALTIME_DISABLE = 0,

@@ -63,6 +63,7 @@ enum {
     ARG_OUTPUT_INVISIBLE,
     ARG_INLOOP_FILTERS,
     ARG_DECODE_FRAME_TYPE,
+    ARG_SEEK,
 };
 
 static const struct option long_opts[] = {
@@ -90,6 +91,7 @@ static const struct option long_opts[] = {
     { "outputinvisible", 1, NULL, ARG_OUTPUT_INVISIBLE },
     { "inloopfilters",   1, NULL, ARG_INLOOP_FILTERS },
     { "decodeframetype", 1, NULL, ARG_DECODE_FRAME_TYPE },
+    { "seek",            1, NULL, ARG_SEEK },
     { NULL,              0, NULL, 0 },
 };
 
@@ -134,6 +136,11 @@ static void usage(const char *const app, const char *const reason, ...) {
             " --frametimes $file:   dump frame times to file\n"
             " --limit/-l $num:      stop decoding after $num frames\n"
             " --skip/-s $num:       skip decoding of the first $num frames\n"
+            " --seek $num:          seek to the $num-th frame (frame number in\n"
+            "                       display order, 0-based) and start output there;\n"
+            "                       decoding starts at the closest preceding keyframe.\n"
+            "                       Only supported for IVF input. Can be combined with\n"
+            "                       --limit (then $num output frames are produced).\n"
             " --realtime [$fract]:  limit framerate, optional argument to override input framerate\n"
             " --realtimecache $num: set the size of the cache in realtime mode (default: 0)\n"
             " --version/-v:         print version and exit\n"
@@ -325,6 +332,7 @@ void parse(const int argc, char *const *const argv,
     int o;
 
     memset(cli_settings, 0, sizeof(*cli_settings));
+    cli_settings->seek = -1;
     dav1d_default_settings(lib_settings);
     lib_settings->strict_std_compliance = 1; // override library default
     int grain_specified = 0;
@@ -435,6 +443,15 @@ void parse(const int argc, char *const *const argv,
                 parse_enum(optarg, decode_frame_type_tbl,
                            ARRAY_SIZE(decode_frame_type_tbl), ARG_DECODE_FRAME_TYPE, argv[0]);
             break;
+        case ARG_SEEK: {
+            char *end;
+            const long seek = strtol(optarg, &end, 0);
+            if (*end || end == optarg || seek < 0 || seek > INT_MAX)
+                error(argv[0], optarg, ARG_SEEK,
+                      "a non-negative integer frame number");
+            cli_settings->seek = (int) seek;
+            break;
+        }
         default:
             usage(argv[0], NULL);
         }
@@ -442,6 +459,22 @@ void parse(const int argc, char *const *const argv,
 
     if (optind < argc)
         usage(argv[0], "Extra/unused arguments found, e.g. '%s'\n", argv[optind]);
+    if (cli_settings->seek >= 0 && cli_settings->skip)
+        usage(argv[0], "--seek and --skip/-s are mutually exclusive; use "
+                       "--seek together with --limit to decode a frame range");
+    if (cli_settings->seek >= 0 && lib_settings->output_invisible_frames)
+        usage(argv[0], "--seek cannot be combined with "
+                       "--outputinvisible 1: seek frame numbers count only "
+                       "visible (display order) frames");
+    if (cli_settings->seek >= 0 &&
+        lib_settings->decode_frame_type != DAV1D_DECODEFRAMETYPE_ALL &&
+        lib_settings->decode_frame_type != DAV1D_DECODEFRAMETYPE_REFERENCE)
+    {
+        usage(argv[0], "--seek cannot be combined with --decodeframetype "
+                       "'key' or 'intra': those modes alter reference frame "
+                       "construction, so seek results would not match a full "
+                       "decode");
+    }
     if (cli_settings->verify) {
         if (cli_settings->outputfile)
             usage(argv[0], "Verification (--verify) requires output file (-o/--output) to not set");

@@ -135,6 +135,19 @@ int input_seek(DemuxerContext *const ctx, const uint64_t pts) {
     return ctx->impl->seek ? ctx->impl->seek(ctx->data, pts) : -1;
 }
 
+int input_seek_frame(DemuxerContext *const ctx, const unsigned frame_num,
+                     unsigned *const seek_pkt, unsigned *const frames_before,
+                     unsigned *const total_showable)
+{
+    return ctx->impl->seek_frame ?
+           ctx->impl->seek_frame(ctx->data, frame_num, seek_pkt,
+                                 frames_before, total_showable) : -1;
+}
+
+const char *input_demuxer_name(DemuxerContext *const ctx) {
+    return ctx->impl->name;
+}
+
 void input_close(DemuxerContext *const ctx) {
     ctx->impl->close(ctx->data);
     free(ctx);

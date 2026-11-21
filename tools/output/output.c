@@ -217,6 +217,12 @@ static void assemble_filename(MuxerContext *const ctx, char *const filename,
     safe_strncat(filename, filename_size, ptr, (int) strlen(ptr));
 }
 
+void output_set_first_framenum(MuxerContext *const ctx,
+                                const unsigned framenum)
+{
+    ctx->framenum = (int) framenum;
+}
+
 int output_write(MuxerContext *const ctx, Dav1dPicture *const p) {
     int res;
 
